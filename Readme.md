@@ -2,8 +2,6 @@
 
 > 面向 CTF Misc 的一站式工具套件：用更优雅的方式解决那些“工具一堆、环境一团”的麻烦场景。
 
-<img width="2879" height="1524" alt="image" src="https://github.com/user-attachments/assets/3fb907d4-1dc1-4153-bd31-77a6a227ebce" />
-
 ## ✨ Features
 
 - ✅ **超级大解码**：支持多种编码格式与**嵌套编码**；一次粘贴，快速出结果  
@@ -17,7 +15,7 @@
 - ✅ **超级二维码**：双引擎识别；支持 GIF 逐帧解码；支持修复定位点后再解码  
 
 > 目标：把常见 Misc 工具链整合到一个套件里，减少重复配环境和来回切工具。
-
+<img width="2879" height="1524" alt="image" src="https://github.com/user-attachments/assets/3fb907d4-1dc1-4153-bd31-77a6a227ebce" />
 ## 📦 Installation
 
 ### Docker 直接运行（推荐）

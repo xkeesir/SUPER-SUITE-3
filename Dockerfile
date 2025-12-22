@@ -1,8 +1,10 @@
 # ========== Stage 1: 构建 PyCDC (C++ 编译阶段) ==========
 FROM python:3.11-slim AS builder
 
-# 安装编译所需的工具链 (去除 git，因为我们改用本地 COPY)
-RUN apt-get update && \
+# [修复]: Debian 12 (Bookworm) 使用 /etc/apt/sources.list.d/debian.sources
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
     cmake \
     build-essential \
@@ -11,10 +13,8 @@ RUN apt-get update && \
 # 编译 PyCDC
 WORKDIR /build
 
-# [修改点]：不再在容器内 git clone，而是直接复制本地下载好的源码
-# 这能完美避开容器内的网络连接问题
+# 复制本地下载好的源码
 COPY pycdc .
-
 RUN cmake . && \
     make
 
@@ -23,8 +23,10 @@ FROM python:3.11-slim
 
 WORKDIR /code
 
-# 1. 安装系统级依赖
-RUN apt-get update && \
+# 1. 安装系统级依赖 (同样使用国内源加速)
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && \
     apt-get install -y --no-install-recommends stegsnow && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -41,9 +43,9 @@ ENV VIRTUAL_ENV=/opt/venv
 RUN python3 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-# 4. 安装 Python 依赖
+# 4. 安装 Python 依赖 (添加国内源参数 -i)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt
 
 # 5. 复制项目代码
 COPY app ./app

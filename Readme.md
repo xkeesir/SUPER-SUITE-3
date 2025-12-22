@@ -2,7 +2,7 @@
 
 > 面向 CTF Misc 的一站式工具套件：用更优雅的方式解决那些“工具一堆、环境一团”的麻烦场景。
 
-![image-20251222185419381](C:\Users\10840\AppData\Roaming\Typora\typora-user-images\image-20251222185419381.png)
+<img width="2879" height="1524" alt="image" src="https://github.com/user-attachments/assets/3fb907d4-1dc1-4153-bd31-77a6a227ebce" />
 
 ## ✨ Features
 

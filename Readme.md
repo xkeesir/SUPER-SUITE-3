@@ -2,7 +2,8 @@
 
 > 面向 CTF Misc 的一站式工具套件：用更优雅的方式解决那些“工具一堆、环境一团”的麻烦场景。
 
-![image-20251222185419381](C:\Users\10840\AppData\Roaming\Typora\typora-user-images\image-20251222185419381.png)
+Demo：
+👉 http://116.62.41.228:8000
 
 ## ✨ Features
 
@@ -18,6 +19,7 @@
 - ✅ **超级WS流量分析**：实现对冰蝎4.0和哥斯拉默认加密流量一站式分析，采用强大的可读性竞争算法，再也无需选择加密方式。
 
 > 目标：把常见 Misc 工具链整合到一个套件里，减少重复配环境和来回切工具。
+<img width="2879" height="1524" alt="image" src="https://github.com/user-attachments/assets/3fb907d4-1dc1-4153-bd31-77a6a227ebce" />
 
 ## 📦 Installation
 

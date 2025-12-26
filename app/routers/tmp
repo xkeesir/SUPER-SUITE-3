@@ -1,0 +1,346 @@
+import base64
+import gzip
+import binascii
+import urllib.parse
+import re
+import uuid
+import hashlib
+import zlib
+from typing import List, Tuple, Optional
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
+
+
+# === 基础工具 ===
+
+def aggressive_clean(text: str) -> str:
+    """暴力清洗：移除所有非 Base64 常见字符"""
+    if not isinstance(text, str): return text
+    # 只保留字母数字和 + / =
+    return re.sub(r'[^a-zA-Z0-9+/=]', '', text)
+
+
+def try_decompress(data: bytes) -> Tuple[bool, bytes]:
+    """尝试 Gzip/Deflate 解压 (增强容错版)"""
+    if not data:
+        return False, data
+
+    # 1. 尝试标准 Gzip
+    if data.startswith(b'\x1f\x8b'):
+        try:
+            return True, gzip.decompress(data)
+        except:
+            # 2. 如果标准 Gzip 失败 (例如 method 不为 08)，尝试跳过头部直接用 Deflate
+            try:
+                # Gzip 头部通常 10 字节，也有可能变长，这里尝试盲解
+                return True, zlib.decompress(data[10:], -zlib.MAX_WBITS)
+            except:
+                pass
+            return True, data  # 标记为 Gzip 但返回原始数据
+
+    # 3. 尝试 Raw Deflate (无头部)
+    try:
+        return True, zlib.decompress(data, -zlib.MAX_WBITS)
+    except:
+        pass
+
+    return False, data
+
+
+def format_content(data: bytes) -> str:
+    """智能格式化"""
+    try:
+        text = data.decode('utf-8', errors='ignore')
+
+        # 哥斯拉常见回显特征
+        if "getBasicsInfo" in text or "FileTree" in text or "methodName" in text or "ok" == text:
+            # 尝试净化非打印字符以便阅读
+            clean_text = "".join([c if c.isprintable() or c in '\r\n\t' else '.' for c in text])
+            return clean_text
+
+        printable = sum(1 for c in text if c.isprintable() or c in '\r\n\t')
+        if len(text) > 0 and (printable / len(text) > 0.6):
+            return text
+    except:
+        pass
+
+    hex_view = binascii.hexlify(data).decode()
+    return "[Binary Data / Mixed Content]\nHex View (First 256 bytes):\n" + '\n'.join(
+        hex_view[i:i + 64] for i in range(0, min(len(hex_view), 512), 64))
+
+
+def extract_http_body(data: bytes) -> bytes:
+    if b"\r\n\r\n" in data:
+        return data.split(b"\r\n\r\n", 1)[1]
+    return data
+
+
+# === 加解密算法 ===
+
+def godzilla_php_xor(data: bytes, key: bytes) -> bytes:
+    if not data: return b""
+    valid_key = key
+    while len(valid_key) < 16:
+        valid_key += key
+    valid_key = valid_key[:16]
+
+    res = bytearray(len(data))
+    for i in range(len(data)):
+        k_char = valid_key[(i + 1) & 15]
+        res[i] = data[i] ^ k_char
+    return bytes(res)
+
+
+def decrypt_aes(ciphertext: bytes, key: bytes) -> Tuple[Optional[bytes], str]:
+    if len(ciphertext) == 0: return None, ""
+    try:
+        cipher = AES.new(key, AES.MODE_ECB)
+        plain = cipher.decrypt(ciphertext)
+        try:
+            return unpad(plain, AES.block_size), "AES-ECB"
+        except:
+            return plain.rstrip(b'\0'), "AES-ECB (NoPad)"
+    except:
+        pass
+    try:
+        cipher = AES.new(key, AES.MODE_CBC, b'\x00' * 16)
+        plain = cipher.decrypt(ciphertext)
+        try:
+            return unpad(plain, AES.block_size), "AES-CBC"
+        except:
+            return plain.rstrip(b'\0'), "AES-CBC (NoPad)"
+    except:
+        pass
+    return None, ""
+
+
+# === 深度 Loader 解析 ===
+
+def deep_decode_loader(val: str) -> Optional[str]:
+    """解析 eval(base64(strrev(...)))"""
+    try:
+        val_unquoted = urllib.parse.unquote(val)
+    except:
+        val_unquoted = val
+
+    patterns = [
+        r"urldecode\s*\(\s*['\"](.*?)['\"]\s*\)",
+        r"base64_decode\s*\(\s*['\"](.*?)['\"]\s*\)",
+    ]
+    payload = None
+    for pat in patterns:
+        match = re.search(pat, val_unquoted)
+        if match:
+            payload = match.group(1)
+            break
+    if not payload: return None
+
+    current_str = payload
+    try:
+        if "urldecode" in val_unquoted:
+            try:
+                current_str = urllib.parse.unquote(current_str)
+            except:
+                pass
+        if "strrev" in val_unquoted:
+            current_str = current_str[::-1]
+
+        current_str = aggressive_clean(current_str)
+        decoded_bytes = base64.b64decode(current_str)
+        return decoded_bytes.decode('utf-8', errors='ignore')
+    except:
+        return None
+
+
+def extract_dynamic_key(php_code: str) -> Optional[str]:
+    match = re.search(r"\$key\s*=\s*['\"]([^'\"]+)['\"]", php_code)
+    if match: return match.group(1)
+    return None
+
+
+# === 主逻辑 ===
+
+def solve_godzilla(full_data: bytes, keys: List[Tuple[str, bytes]]) -> List[dict]:
+    results = []
+
+    body = extract_http_body(full_data)
+    search_body = body if len(body) > 0 else full_data
+
+    current_keys = list(keys)
+    body_str = ""
+    try:
+        body_str = search_body.decode('utf-8', errors='ignore')
+    except:
+        pass
+
+    payload_candidates = []
+
+    # === 1. 参数扫描 (Requests) ===
+    params = []
+    if body_str:
+        try:
+            params = re.findall(r"(?:^|&|\s)([^=\s]+)=([^&\s]*)", body_str)
+        except:
+            pass
+
+    for k, val in params:
+        # A. 提取 Key
+        if "eval" in val or "base64" in val or "%28" in val:
+            decoded_php = deep_decode_loader(val)
+            if decoded_php:
+                dynamic_k = extract_dynamic_key(decoded_php)
+                if dynamic_k:
+                    k_bytes = dynamic_k.encode()
+                    key_exists = False
+                    for _, existing_k in current_keys:
+                        if existing_k == k_bytes:
+                            key_exists = True
+                            break
+                    if not key_exists:
+                        current_keys.insert(0, (f"Dynamic Key ({dynamic_k[:4]}..)", k_bytes))
+                        results.append({
+                            "id": str(uuid.uuid4()),
+                            "title": "Godzilla Loader Found",
+                            "type": "info",
+                            "algo": "PHP Decode",
+                            "source": f"Param '{k}'",
+                            "content": f"[Key]: {dynamic_k}\n[PHP]: {decoded_php[:200]}..."
+                        })
+
+        # B. 参数作为 Payload
+        if len(val) > 20:
+            try:
+                # 必须先 URL Decode，防止 %3D 被破坏
+                val_clean = urllib.parse.unquote(val) if '%' in val else val
+                val_clean = aggressive_clean(val_clean)
+                b64 = base64.b64decode(val_clean)
+                if len(b64) > 5:
+                    payload_candidates.append((f"Param '{k}'", b64))
+            except:
+                pass
+
+    # === 2. 响应包提取策略 (Responses) ===
+
+    # [策略 A] 正则提取 (宽松模式)
+    # 匹配: 16位HEX + 任意内容(包含换行) + 16位HEX
+    try:
+        pattern = re.compile(rb'([a-fA-F0-9]{16})(.+?)([a-fA-F0-9]{16})', re.DOTALL)
+        matches = pattern.findall(search_body)
+        for _, content, _ in matches:
+            try:
+                content_clean = aggressive_clean(content.decode('utf-8', errors='ignore'))
+                if len(content_clean) > 0:
+                    b64 = base64.b64decode(content_clean)
+                    payload_candidates.append(("Resp MD5-Regex", b64))
+            except:
+                pass
+    except:
+        pass
+
+    # [策略 B] 暴力截断 (Slice 16:-16) - 针对正则失败的情况
+    # 许多哥斯拉响应包就是纯文本的 MD5+B64+MD5，直接去掉头尾即可
+    if len(body_str) > 32:
+        try:
+            # 假设头尾各16字节是干扰
+            sliced = body_str[16:-16]
+            # 简单清洗，去掉换行
+            sliced_clean = aggressive_clean(sliced)
+            if len(sliced_clean) > len(sliced) * 0.7:  # 确保主体大部分是B64
+                b64 = base64.b64decode(sliced_clean)
+                payload_candidates.append(("Resp Slice [16:-16]", b64))
+        except:
+            pass
+
+    # [策略 C] 原始 Body (Raw) - 针对 XOR_RAW 或无包装情况
+    payload_candidates.append(("Raw Body", search_body))
+
+    # === 3. 暴力解密 ===
+    seen_hashes = set()
+
+    for p_name, payload in payload_candidates:
+        if len(payload) == 0: continue
+
+        for k_name, key in current_keys:
+            real_key = key if isinstance(key, bytes) else key.encode()
+
+            # PHP XOR
+            plain_xor = godzilla_php_xor(payload, real_key)
+            if plain_xor:
+                is_gz, final = try_decompress(plain_xor)
+                _process_result(plain_xor, "PHP_XOR", k_name, p_name, seen_hashes, results)
+
+            # AES
+            if "Raw" not in p_name:
+                plain_aes, mode_aes = decrypt_aes(payload, real_key)
+                if plain_aes:
+                    _process_result(plain_aes, mode_aes, k_name, p_name, seen_hashes, results)
+
+    return results
+
+
+def _process_result(plain_data: bytes, mode: str, key_name: str, payload_source: str, seen_hashes: set, results: list):
+    is_gz, final = try_decompress(plain_data)
+
+    score = 0
+    desc = "Unknown"
+    txt_preview = ""
+    try:
+        txt_preview = final.decode('utf-8', errors='ignore')
+    except:
+        pass
+
+    # 特征识别
+    if b'methodName' in final:
+        score = 100;
+        desc = "Godzilla Request (Protocol)"
+    elif "getBasicsInfo" in txt_preview or "FileTree" in txt_preview:
+        score = 100;
+        desc = "Godzilla Command"
+    elif final.startswith(b'\xCA\xFE\xBA\xBE'):
+        score = 100;
+        desc = "Java Class"
+    elif b'@ini_set' in final[:100] or b'<?php' in final[:100]:
+        score = 100;
+        desc = "PHP Code"
+    elif is_gz:
+        score = 85;
+        desc = "Gzip Data"
+    elif final.startswith(b'\x1f\x8b'):
+        score = 80;
+        desc = "Gzip Header (Broken)"
+    else:
+        try:
+            printable = sum(1 for c in txt_preview if c.isprintable() or c in '\r\n\t')
+            if len(txt_preview) > 0:
+                ratio = printable / len(txt_preview)
+                if ratio > 0.6:
+                    score = 60;
+                    desc = "Text Output"
+                elif ratio > 0.4:
+                    score = 30;
+                    desc = "Binary/Text Mix"
+                else:
+                    score = 10;
+                    desc = "Binary"
+            else:
+                score = 0
+        except:
+            score = 0;
+            desc = "Binary"
+
+    if "Dynamic" in key_name: score += 10
+    if "MD5" in payload_source: score += 20
+
+    if score >= 30:
+        h = hashlib.md5(final).hexdigest()
+        if h in seen_hashes: return
+        seen_hashes.add(h)
+
+        results.append({
+            "id": str(uuid.uuid4()),
+            "title": f"Decrypted: {desc}",
+            "type": "success" if score >= 80 else "warning",
+            "algo": f"{mode} | Key: {key_name}",
+            "source": payload_source,
+            "content": format_content(final)
+        })

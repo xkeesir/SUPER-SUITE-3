@@ -3,3 +3,7 @@ uvicorn
 python-multipart
 numpy
 opencv-python-headless
+scapy
+cryptography
+pydantic
+pycryptodome

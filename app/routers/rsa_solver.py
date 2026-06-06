@@ -3,16 +3,22 @@ import itertools
 from typing import List, Dict, Any, Optional, Union
 
 import gmpy2
+<<<<<<< HEAD
 from pydantic import BaseModel
+=======
+>>>>>>> 3e068d5fcc9577429dffd86e6c8086867b0817c7
 from Crypto.Util.number import long_to_bytes
 from fastapi import APIRouter, UploadFile, File
 from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/api/rsa", tags=["rsa"])
 
+<<<<<<< HEAD
 # 防止排列组合爆炸：permutations(N,5) 在 N>20 时会膨胀到千万级
 MAX_NUMBERS = 20
 
+=======
+>>>>>>> 3e068d5fcc9577429dffd86e6c8086867b0817c7
 
 # ==========================================
 # 辅助工具
@@ -427,6 +433,7 @@ async def solve_rsa(file: UploadFile = File(...)):
             "numbers": [str(x) for x in numbers],
         }, status_code=400)
 
+<<<<<<< HEAD
     if len(numbers) > MAX_NUMBERS:
         return JSONResponse({
             "status": "error",
@@ -591,4 +598,8 @@ def named_param_solver(params: RsaParams) -> Dict[str, Any]:
 @router.post("/solve_params")
 async def solve_rsa_params(params: RsaParams):
     result = named_param_solver(params)
+=======
+    result = all_in_one_rsa_solver(numbers)
+    result["numbers"] = [str(x) for x in numbers]
+>>>>>>> 3e068d5fcc9577429dffd86e6c8086867b0817c7
     return JSONResponse(result)

@@ -7,3 +7,4 @@ scapy
 cryptography
 pydantic
 pycryptodome
+gmpy2

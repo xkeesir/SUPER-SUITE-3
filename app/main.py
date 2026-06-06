@@ -18,11 +18,13 @@ from fastapi.responses import FileResponse, JSONResponse
 # 引入流量分析路由
 # ⚠️ 确保你已经创建了 app/routers/traffic.py 并且里面代码正确
 from app.routers import traffic
+from app.routers import rsa_solver
 
 app = FastAPI(title="CTF Super Suite")
 
 # === 注册路由 ===
 app.include_router(traffic.router)
+app.include_router(rsa_solver.router)
 
 # === 挂载静态资源 ===
 # 确保你的项目结构中有 app/static/assets 文件夹
